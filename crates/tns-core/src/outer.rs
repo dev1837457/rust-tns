@@ -2,6 +2,11 @@
  * This file is part of the Rust TNS modernization and is made available
  * under the Mozilla Public License Version 1.1. See the repository LICENSE
  * file for the complete terms.
+ *
+ * The Original Code is Rust TNS modernization.
+ * The Initial Developer is TNS modernization contributors.
+ * Portions created by the Initial Developer are Copyright (C) 2026
+ * TNS modernization contributors. All Rights Reserved.
  */
 
 //! The ZIP-like outer TNS container and payload dispatch.
@@ -163,7 +168,7 @@ impl TnsContainer {
         } else {
             None
         };
-        let eocd = find_eocd(data);
+        let eocd = find_eocd(data, options.mode);
         if let Some((eocd_offset, kind)) = eocd {
             match parse_central_directory(data, eocd_offset, kind, options) {
                 Ok((entries, central_directory_offset)) => {
@@ -233,6 +238,20 @@ pub enum MetadataStatus {
 
 /// Decode method 0, method 8, or method 13 and validate CRC/size metadata.
 pub fn decode_entry(data: &[u8], entry: &TnsEntry, options: ParseOptions) -> Result<EntryData> {
+    if data.len() > options.max_input_size {
+        return Err(TnsError::LimitExceeded {
+            kind: "input",
+            actual: data.len() as u64,
+            limit: options.max_input_size as u64,
+        });
+    }
+    if entry.compressed_size as usize > options.max_entry_size {
+        return Err(TnsError::LimitExceeded {
+            kind: "compressed entry",
+            actual: entry.compressed_size as u64,
+            limit: options.max_entry_size as u64,
+        });
+    }
     let container = TnsContainer {
         entries: Vec::new(),
         first_timlp_version: None,
@@ -255,6 +274,7 @@ pub fn decode_entry(data: &[u8], entry: &TnsEntry, options: ParseOptions) -> Res
             let decoded = decode_method13_to_xml(
                 payload,
                 TixcLimits {
+                    max_input_size: options.max_entry_size,
                     max_output_size: options.max_entry_size,
                     ..TixcLimits::default()
                 },
@@ -378,7 +398,9 @@ pub struct TnsWriteOptions {
     pub resource_compression_level: u32,
     pub metadata_style: MetadataStyle,
     pub use_tipd_eocd: bool,
+    pub max_name_size: usize,
     pub max_entry_size: usize,
+    pub max_total_size: usize,
 }
 
 impl Default for TnsWriteOptions {
@@ -389,7 +411,9 @@ impl Default for TnsWriteOptions {
             resource_compression_level: 9,
             metadata_style: MetadataStyle::Final,
             use_tipd_eocd: true,
+            max_name_size: 4_096,
             max_entry_size: 256 * 1024 * 1024,
+            max_total_size: 512 * 1024 * 1024,
         }
     }
 }
@@ -419,6 +443,19 @@ pub fn build_tns(entries: &[TnsWriteEntry], options: &TnsWriteOptions) -> Result
             limit: 65_535,
         });
     }
+    if options.resource_compression_level > 9 {
+        return Err(TnsError::field(
+            "deflate level",
+            options.resource_compression_level.to_string(),
+        ));
+    }
+    if options.method13.compression_level > 9 {
+        return Err(TnsError::field(
+            "method-13 compression level",
+            options.method13.compression_level.to_string(),
+        ));
+    }
+    let mut total_input_size = 0usize;
     let mut names = HashSet::with_capacity(entries.len());
     let mut prepared = Vec::with_capacity(entries.len());
     for entry in entries {
@@ -436,12 +473,23 @@ pub fn build_tns(entries: &[TnsWriteEntry], options: &TnsWriteOptions) -> Result
                 limit: options.max_entry_size as u64,
             });
         }
+        total_input_size = total_input_size
+            .checked_add(entry.data.len())
+            .ok_or_else(|| TnsError::field("total input size", "overflow"))?;
+        if total_input_size > options.max_total_size {
+            return Err(TnsError::LimitExceeded {
+                kind: "total input size",
+                actual: total_input_size as u64,
+                limit: options.max_total_size as u64,
+            });
+        }
         let name = entry.name.as_bytes().to_vec();
-        if name.len() > u16::MAX as usize {
+        let max_name_size = options.max_name_size.min(u16::MAX as usize);
+        if name.len() > max_name_size {
             return Err(TnsError::LimitExceeded {
                 kind: "entry name",
                 actual: name.len() as u64,
-                limit: u16::MAX as u64,
+                limit: max_name_size as u64,
             });
         }
         let (payload, crc32, uncompressed_size) = match entry.method {
@@ -466,6 +514,13 @@ pub fn build_tns(entries: &[TnsWriteEntry], options: &TnsWriteOptions) -> Result
                 actual: payload.len() as u64,
                 limit: u32::MAX as u64,
             })?;
+        if payload.len() > options.max_entry_size {
+            return Err(TnsError::LimitExceeded {
+                kind: "compressed entry",
+                actual: payload.len() as u64,
+                limit: options.max_entry_size as u64,
+            });
+        }
         let uncompressed_size =
             u32::try_from(uncompressed_size).map_err(|_| TnsError::LimitExceeded {
                 kind: "uncompressed entry",
@@ -482,7 +537,34 @@ pub fn build_tns(entries: &[TnsWriteEntry], options: &TnsWriteOptions) -> Result
         });
     }
 
-    let mut output = Vec::new();
+    let output_size = prepared
+        .iter()
+        .enumerate()
+        .try_fold(22usize, |total, (index, entry)| {
+            let local_header_size = if index == 0 { 36usize } else { 30usize };
+            total
+                .checked_add(local_header_size)
+                .and_then(|value| value.checked_add(entry.name.len()))
+                .and_then(|value| value.checked_add(entry.payload.len()))
+                .and_then(|value| value.checked_add(46))
+                .and_then(|value| value.checked_add(entry.name.len()))
+                .ok_or_else(|| TnsError::field("TNS output size", "overflow"))
+        })?;
+    if output_size > options.max_total_size {
+        return Err(TnsError::LimitExceeded {
+            kind: "TNS output",
+            actual: output_size as u64,
+            limit: options.max_total_size as u64,
+        });
+    }
+    if output_size > u32::MAX as usize {
+        return Err(TnsError::LimitExceeded {
+            kind: "TNS output",
+            actual: output_size as u64,
+            limit: u32::MAX as u64,
+        });
+    }
+    let mut output = Vec::with_capacity(output_size);
     let mut local_offsets = Vec::with_capacity(prepared.len());
     for (index, entry) in prepared.iter().enumerate() {
         let local_offset = u32::try_from(output.len()).map_err(|_| TnsError::LimitExceeded {
@@ -581,7 +663,7 @@ fn put_u32(output: &mut Vec<u8>, value: u32) {
 }
 
 pub fn validate_archive_name(name: &str) -> Result<()> {
-    if name.is_empty() || name.contains('\0') {
+    if name.is_empty() || name.chars().any(char::is_control) {
         return Err(TnsError::UnsafePath(name.to_owned()));
     }
     if name.starts_with('/') || name.starts_with('\\') || name.contains('\\') || name.contains(':')
@@ -649,7 +731,7 @@ fn display_name(name: &str) -> String {
         .collect()
 }
 
-fn find_eocd(data: &[u8]) -> Option<(usize, EocdKind)> {
+fn find_eocd(data: &[u8], mode: ParseMode) -> Option<(usize, EocdKind)> {
     if data.len() < 22 {
         return None;
     }
@@ -670,7 +752,7 @@ fn find_eocd(data: &[u8]) -> Option<(usize, EocdKind)> {
         else {
             continue;
         };
-        if end <= data.len() {
+        if end <= data.len() && (mode == ParseMode::Tolerant || end == data.len()) {
             return Some((offset, kind));
         }
     }
@@ -683,9 +765,23 @@ fn parse_central_directory(
     _kind: EocdKind,
     options: ParseOptions,
 ) -> Result<(Vec<TnsEntry>, usize)> {
+    let disk_number = read_u16(data, eocd_offset + 4)?;
+    let central_disk = read_u16(data, eocd_offset + 6)?;
+    let disk_entries = read_u16(data, eocd_offset + 8)? as usize;
     let total_entries = read_u16(data, eocd_offset + 10)? as usize;
     let central_size = read_u32(data, eocd_offset + 12)? as usize;
     let central_offset = read_u32(data, eocd_offset + 16)? as usize;
+    if disk_number != 0 || central_disk != 0 || disk_entries != total_entries {
+        return Err(TnsError::Unsupported(
+            "multi-disk or inconsistent EOCD records are not supported".into(),
+        ));
+    }
+    if total_entries == 0 {
+        return Err(TnsError::field(
+            "central entry count",
+            "a TNS container must contain at least one entry",
+        ));
+    }
     if total_entries > options.max_entries {
         return Err(TnsError::LimitExceeded {
             kind: "entry count",
@@ -700,7 +796,14 @@ fn parse_central_directory(
     ];
     let mut first_error = None;
     for candidate in candidates.into_iter().flatten() {
-        match parse_central_at(data, candidate, total_entries, central_size, options) {
+        match parse_central_at(
+            data,
+            candidate,
+            eocd_offset,
+            total_entries,
+            central_size,
+            options,
+        ) {
             Ok(entries) => return Ok((entries, candidate)),
             Err(error) => {
                 if first_error.is_none() {
@@ -718,18 +821,28 @@ fn parse_central_directory(
 fn parse_central_at(
     data: &[u8],
     mut offset: usize,
+    eocd_offset: usize,
     total_entries: usize,
     central_size: usize,
     options: ParseOptions,
 ) -> Result<Vec<TnsEntry>> {
+    let central_start = offset;
     let central_end = offset
         .checked_add(central_size)
         .ok_or_else(|| TnsError::field("central directory", "range overflow"))?;
     if central_end > data.len() {
-        return Err(TnsError::truncated(offset, central_size));
+        return Err(TnsError::truncated(offset, central_end - data.len()));
+    }
+    if central_end != eocd_offset {
+        return Err(TnsError::field(
+            "central directory size",
+            format!("directory ends at 0x{central_end:x}, EOCD starts at 0x{eocd_offset:x}"),
+        ));
     }
     let mut entries = Vec::with_capacity(total_entries);
     let mut names = HashSet::with_capacity(total_entries);
+    let mut local_offsets = HashSet::with_capacity(total_entries);
+    let mut local_ranges = Vec::with_capacity(total_entries);
     let mut total_uncompressed = 0usize;
     for _ in 0..total_entries {
         require_signature(data, offset, CENTRAL_SIGNATURE, "central directory")?;
@@ -737,7 +850,7 @@ fn parse_central_at(
             .checked_add(46)
             .ok_or_else(|| TnsError::field("central record", "offset overflow"))?;
         if fixed_end > data.len() {
-            return Err(TnsError::truncated(offset, 46));
+            return Err(TnsError::truncated(offset, fixed_end - data.len()));
         }
         let flags = read_u16(data, offset + 8)?;
         let method = read_u16(data, offset + 10)?;
@@ -747,7 +860,13 @@ fn parse_central_at(
         let name_len = read_u16(data, offset + 28)? as usize;
         let extra_len = read_u16(data, offset + 30)? as usize;
         let comment_len = read_u16(data, offset + 32)? as usize;
+        let disk_start = read_u16(data, offset + 34)?;
         let local_offset = read_u32(data, offset + 42)? as usize;
+        if disk_start != 0 {
+            return Err(TnsError::Unsupported(
+                "multi-disk central records are not supported".into(),
+            ));
+        }
         if name_len > options.max_name_size {
             return Err(TnsError::LimitExceeded {
                 kind: "entry name",
@@ -761,10 +880,13 @@ fn parse_central_at(
             .and_then(|value| value.checked_add(extra_len))
             .and_then(|value| value.checked_add(comment_len))
             .ok_or_else(|| TnsError::field("central record", "range overflow"))?;
-        if record_end > data.len() || record_end > central_end {
-            return Err(TnsError::truncated(
-                name_start,
-                record_end.saturating_sub(data.len()),
+        if record_end > data.len() {
+            return Err(TnsError::truncated(name_start, record_end - data.len()));
+        }
+        if record_end > central_end {
+            return Err(TnsError::field(
+                "central record",
+                format!("record with a {name_len}-byte name extends past the directory"),
             ));
         }
         let name = decode_name(
@@ -798,27 +920,32 @@ fn parse_central_at(
             kind: "central record",
             detail: format!("local header for {name:?} is not valid"),
         })?;
-        if local.name_len != name_len {
+        if local.name_len != name_len
+            || data.get(local.name_start..local.name_start + local.name_len)
+                != data.get(name_start..name_start + name_len)
+        {
+            return Err(TnsError::field("local/central name", format!("{name:?}")));
+        }
+        if method != local.method
+            || flags != local.flags
+            || central_crc != local.crc32
+            || central_csize != local.compressed_size
+            || central_usize != local.uncompressed_size
+        {
             return Err(TnsError::field(
-                "local/central name length",
-                format!("{name:?}"),
+                "local/central metadata",
+                format!("fields differ for {name:?}"),
             ));
         }
-        let compressed_size = if central_csize == 0 {
-            local.compressed_size
-        } else {
-            central_csize
-        };
-        let uncompressed_size = if central_usize == 0 {
-            local.uncompressed_size
-        } else {
-            central_usize
-        };
-        let crc32 = if central_crc == 0 {
-            local.crc32
-        } else {
-            central_crc
-        };
+        if !local_offsets.insert(actual_local_offset) {
+            return Err(TnsError::field(
+                "local header offset",
+                format!("more than one central entry points to 0x{actual_local_offset:x}"),
+            ));
+        }
+        let compressed_size = central_csize;
+        let uncompressed_size = central_usize;
+        let crc32 = central_crc;
         let end = local
             .data_offset
             .checked_add(compressed_size as usize)
@@ -826,6 +953,22 @@ fn parse_central_at(
         if end > data.len() {
             return Err(TnsError::truncated(local.data_offset, end - data.len()));
         }
+        if actual_local_offset >= central_start || end > central_start {
+            return Err(TnsError::field(
+                "entry data range",
+                format!("{name:?} overlaps the central directory"),
+            ));
+        }
+        if local_ranges
+            .iter()
+            .any(|&(start, previous_end)| actual_local_offset < previous_end && start < end)
+        {
+            return Err(TnsError::field(
+                "entry data range",
+                format!("{name:?} overlaps another local record"),
+            ));
+        }
+        local_ranges.push((actual_local_offset, end));
         if compressed_size as usize > options.max_entry_size {
             return Err(TnsError::LimitExceeded {
                 kind: "compressed entry",
@@ -852,8 +995,8 @@ fn parse_central_at(
         }
         entries.push(TnsEntry {
             name,
-            method: if method == 0 { local.method } else { method },
-            flags: if flags == 0 { local.flags } else { flags },
+            method,
+            flags,
             crc32,
             compressed_size,
             uncompressed_size,
@@ -867,6 +1010,12 @@ fn parse_central_at(
     if entries.len() != total_entries {
         return Err(TnsError::field("central entry count", "count mismatch"));
     }
+    if offset != central_end {
+        return Err(TnsError::field(
+            "central directory size",
+            format!("{} unparsed bytes remain", central_end - offset),
+        ));
+    }
     Ok(entries)
 }
 
@@ -878,6 +1027,7 @@ struct LocalRecord {
     compressed_size: u32,
     uncompressed_size: u32,
     name_len: usize,
+    name_start: usize,
     data_offset: usize,
 }
 
@@ -913,15 +1063,16 @@ fn parse_local(data: &[u8], offset: usize, options: ParseOptions) -> Result<Loca
         .checked_add(26)
         .ok_or_else(|| TnsError::field("local record", "offset overflow"))?;
     if fixed_end > data.len() {
-        return Err(TnsError::truncated(fixed_offset, 26));
-    }
-    let flags = read_u16(data, fixed_offset + 2)?;
-    if flags & 0x0008 != 0 {
-        return Err(TnsError::Unsupported(
-            "data-descriptor local headers are not supported".into(),
-        ));
+        return Err(TnsError::truncated(fixed_offset, fixed_end - data.len()));
     }
     let method = read_u16(data, fixed_offset + 4)?;
+    let flags = read_u16(data, fixed_offset + 2)?;
+    let supported_flags = 0x0800 | if method == 8 { 0x0006 } else { 0 };
+    if flags & !supported_flags != 0 {
+        return Err(TnsError::Unsupported(format!(
+            "ZIP flags 0x{flags:04x} are not supported for method {method}"
+        )));
+    }
     let crc32 = read_u32(data, fixed_offset + 10)?;
     let compressed_size = read_u32(data, fixed_offset + 14)?;
     let uncompressed_size = read_u32(data, fixed_offset + 18)?;
@@ -948,7 +1099,8 @@ fn parse_local(data: &[u8], offset: usize, options: ParseOptions) -> Result<Loca
             limit: options.max_entry_size as u64,
         });
     }
-    let data_offset = fixed_end
+    let name_start = fixed_end;
+    let data_offset = name_start
         .checked_add(name_len)
         .and_then(|value| value.checked_add(extra_len))
         .ok_or_else(|| TnsError::field("local record", "data offset overflow"))?;
@@ -966,62 +1118,37 @@ fn parse_local(data: &[u8], offset: usize, options: ParseOptions) -> Result<Loca
         compressed_size,
         uncompressed_size,
         name_len,
+        name_start,
         data_offset,
     })
 }
 
 fn scan_local_headers(data: &[u8], options: ParseOptions) -> Result<Vec<TnsEntry>> {
-    let mut offsets = Vec::new();
-    if data.starts_with(TIMLP_PREFIX) {
-        offsets.push(0);
-    }
-    let mut position = 0usize;
-    while let Some(relative) = data
-        .get(position..)
-        .and_then(|rest| find_window(rest, LOCAL_SIGNATURE))
-    {
-        let offset = position + relative;
-        offsets.push(offset);
-        position = offset + 1;
-    }
-    offsets.sort_unstable();
-    offsets.dedup();
-
     let mut entries = Vec::new();
     let mut names = HashSet::new();
     let mut total_uncompressed = 0usize;
-    for offset in offsets {
-        let local = match parse_local(data, offset, options) {
-            Ok(local) => local,
-            Err(_) => continue,
-        };
-        let fixed_offset = if data[offset..].starts_with(LOCAL_SIGNATURE) {
-            match offset.checked_add(4) {
-                Some(value) => value,
-                None => continue,
-            }
-        } else {
-            match offset.checked_add(10) {
-                Some(value) => value,
-                None => continue,
-            }
-        };
-        let Some(name_start) = fixed_offset.checked_add(26) else {
-            continue;
-        };
-        let Some(name_end) = name_start.checked_add(local.name_len) else {
-            continue;
-        };
-        if name_end > data.len() {
-            continue;
+    let mut offset = 0usize;
+    loop {
+        let starts_local = data.get(offset..).is_some_and(|bytes| {
+            bytes.starts_with(LOCAL_SIGNATURE) || bytes.starts_with(TIMLP_PREFIX)
+        });
+        if !starts_local {
+            break;
         }
-        let name = match decode_name(&data[name_start..name_end], local.flags, options.mode) {
-            Ok(name) => name,
-            Err(_) => continue,
-        };
-        if validate_archive_name(&name).is_err() {
-            continue;
+        if entries.len() >= options.max_entries {
+            return Err(TnsError::LimitExceeded {
+                kind: "entry count",
+                actual: entries.len() as u64 + 1,
+                limit: options.max_entries as u64,
+            });
         }
+        let local = parse_local(data, offset, options)?;
+        let name_end = local
+            .name_start
+            .checked_add(local.name_len)
+            .ok_or_else(|| TnsError::field("local name", "range overflow"))?;
+        let name = decode_name(&data[local.name_start..name_end], local.flags, options.mode)?;
+        validate_archive_name(&name)?;
         if !names.insert(name.clone()) {
             return Err(TnsError::field(
                 "local entry name",
@@ -1054,20 +1181,20 @@ fn scan_local_headers(data: &[u8], options: ParseOptions) -> Result<Vec<TnsEntry
             local_header_kind: local.kind,
             source: EntrySource::LocalScan,
         });
-        if entries.len() >= options.max_entries {
-            return Err(TnsError::LimitExceeded {
-                kind: "entry count",
-                actual: entries.len() as u64 + 1,
-                limit: options.max_entries as u64,
-            });
-        }
+        offset = local
+            .data_offset
+            .checked_add(local.compressed_size as usize)
+            .ok_or_else(|| TnsError::field("local record", "data range overflow"))?;
     }
     Ok(entries)
 }
 
 fn parse_timlp_version(data: &[u8], offset: usize) -> Result<(TimlpVersion, usize)> {
-    if offset.checked_add(10).is_none() || offset + 10 > data.len() {
-        return Err(TnsError::truncated(offset, 10));
+    let end = offset
+        .checked_add(10)
+        .ok_or_else(|| TnsError::field("TIMLP local header", "range overflow"))?;
+    if end > data.len() {
+        return Err(TnsError::truncated(offset, end - data.len()));
     }
     if !data[offset..].starts_with(TIMLP_PREFIX) {
         return Err(TnsError::InvalidSignature {
@@ -1118,7 +1245,7 @@ fn read_u16(data: &[u8], offset: usize) -> Result<u16> {
         .ok_or_else(|| TnsError::field("u16 field", "offset overflow"))?;
     let bytes = data
         .get(offset..end)
-        .ok_or_else(|| TnsError::truncated(offset, 2))?;
+        .ok_or_else(|| TnsError::truncated(offset, end.saturating_sub(data.len())))?;
     Ok(u16::from_le_bytes([bytes[0], bytes[1]]))
 }
 
@@ -1128,11 +1255,6 @@ fn read_u32(data: &[u8], offset: usize) -> Result<u32> {
         .ok_or_else(|| TnsError::field("u32 field", "offset overflow"))?;
     let bytes = data
         .get(offset..end)
-        .ok_or_else(|| TnsError::truncated(offset, 4))?;
+        .ok_or_else(|| TnsError::truncated(offset, end.saturating_sub(data.len())))?;
     Ok(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
-}
-
-fn find_window(data: &[u8], needle: &[u8]) -> Option<usize> {
-    data.windows(needle.len())
-        .position(|window| window == needle)
 }

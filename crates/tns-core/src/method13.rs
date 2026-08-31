@@ -2,6 +2,11 @@
  * This file is part of the Rust TNS modernization and is made available
  * under the Mozilla Public License Version 1.1. See the repository LICENSE
  * file for the complete terms.
+ *
+ * The Original Code is Rust TNS modernization.
+ * The Initial Developer is TNS modernization contributors.
+ * Portions created by the Initial Developer are Copyright (C) 2026
+ * TNS modernization contributors. All Rights Reserved.
  */
 
 //! TI-Nspire compression method 13.
@@ -14,6 +19,7 @@ use des::cipher::{Block, BlockDecrypt, BlockEncrypt, KeyInit};
 use des::TdesEde3;
 
 use crate::compression::{deflate_raw, inflate_raw};
+use crate::tixc::has_only_xml_characters;
 use crate::{decode_tixc_with_limits, Result, TixcLimits, TnsError};
 
 const HEADER_KEY: [u8; 24] = [
@@ -52,6 +58,14 @@ impl Default for Method13Options {
 
 /// Decode a method-13 payload to its inflated TIXC stream.
 pub fn decode_method13_to_tixc(payload: &[u8]) -> Result<Vec<u8>> {
+    decode_method13_to_tixc_with_limit(payload, MAX_METHOD13_DEFLATED)
+}
+
+/// Decode a method-13 payload while bounding the inflated TIXC stream.
+pub fn decode_method13_to_tixc_with_limit(
+    payload: &[u8],
+    max_inflated_size: usize,
+) -> Result<Vec<u8>> {
     if payload.len() < 40 {
         return Err(TnsError::method13(
             "payload is shorter than the 40-byte TIEN0100 header",
@@ -85,14 +99,25 @@ pub fn decode_method13_to_tixc(payload: &[u8]) -> Result<Vec<u8>> {
         ));
     }
 
+    // Raw DEFLATE adds only small framing overhead for encoder-produced data.
+    // A fixed allowance also keeps tiny caller limits useful without cloning
+    // an arbitrarily large encrypted body first.
+    let max_payload_size = max_inflated_size.saturating_add(64 * 1024);
+    if payload.len() > max_payload_size {
+        return Err(TnsError::LimitExceeded {
+            kind: "method-13 payload",
+            actual: payload.len() as u64,
+            limit: max_payload_size as u64,
+        });
+    }
     let mut encrypted_body = payload[40..].to_vec();
     crypt_body(&mut encrypted_body, seed, &key_material)?;
-    inflate_raw(&encrypted_body, MAX_METHOD13_DEFLATED)
+    inflate_raw(&encrypted_body, max_inflated_size)
 }
 
 /// Decode a method-13 payload all the way to readable XML.
 pub fn decode_method13_to_xml(payload: &[u8], limits: TixcLimits) -> Result<Vec<u8>> {
-    let tixc = decode_method13_to_tixc(payload)?;
+    let tixc = decode_method13_to_tixc_with_limit(payload, limits.max_input_size)?;
     if tixc.starts_with(b"TIXC0100") {
         decode_tixc_with_limits(&tixc, limits)
     } else if tixc.starts_with(b"<?xml") {
@@ -102,6 +127,11 @@ pub fn decode_method13_to_xml(payload: &[u8], limits: TixcLimits) -> Result<Vec<
                 actual: tixc.len() as u64,
                 limit: limits.max_output_size as u64,
             });
+        }
+        if !has_only_xml_characters(&tixc) {
+            return Err(TnsError::method13(
+                "inflated XML is not valid UTF-8 XML 1.0 text",
+            ));
         }
         Ok(tixc)
     } else {
@@ -210,5 +240,34 @@ fn decrypt_blocks(cipher: &TdesEde3, bytes: &mut [u8; 40]) {
 fn encrypt_blocks(cipher: &TdesEde3, bytes: &mut [u8; 40]) {
     for block in bytes.chunks_mut(8) {
         cipher.encrypt_block(Block::<TdesEde3>::from_mut_slice(block));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn encode_inflated_for_test(inflated: &[u8]) -> Vec<u8> {
+        let options = Method13Options::default();
+        let mut body = deflate_raw(inflated, options.compression_level).unwrap();
+        crypt_body(&mut body, options.seed, &options.key_material).unwrap();
+
+        let mut header = [0u8; 40];
+        header[..8].copy_from_slice(b"TIEN0100");
+        header[8..12].copy_from_slice(&0x400u32.to_le_bytes());
+        header[12..16].copy_from_slice(&options.seed.to_le_bytes());
+        header[16..37].copy_from_slice(&options.key_material);
+        let header_cipher = TdesEde3::new_from_slice(&HEADER_KEY).unwrap();
+        encrypt_blocks(&header_cipher, &mut header);
+
+        let mut payload = header.to_vec();
+        payload.extend_from_slice(&body);
+        payload
+    }
+
+    #[test]
+    fn raw_xml_fallback_rejects_forbidden_xml_characters() {
+        let payload = encode_inflated_for_test(b"<?xml version=\"1.0\"?><x>\0</x>");
+        assert!(decode_method13_to_xml(&payload, TixcLimits::default()).is_err());
     }
 }

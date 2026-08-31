@@ -13,6 +13,8 @@
  *
  * The Original Code is Rust TNS modernization.
  * The Initial Developer of the Original Code is TNS modernization contributors.
+ * Portions created by the Initial Developer are Copyright (C) 2026
+ * TNS modernization contributors. All Rights Reserved.
  */
 
 //! Safe, bounded building blocks for TI-Nspire `.tns` documents.
@@ -30,7 +32,8 @@ mod tixc;
 
 pub use error::{Result, TnsError};
 pub use method13::{
-    decode_method13_to_tixc, decode_method13_to_xml, encode_tixc_to_method13, Method13Options,
+    decode_method13_to_tixc, decode_method13_to_tixc_with_limit, decode_method13_to_xml,
+    encode_tixc_to_method13, Method13Options,
 };
 pub use outer::{
     build_tns, decode_entry, describe_container, validate_archive_name, EntryData, EntryMetadata,

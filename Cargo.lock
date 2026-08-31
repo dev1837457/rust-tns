@@ -377,6 +377,7 @@ name = "tns"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "rustix",
  "tempfile",
  "tns-core",
 ]

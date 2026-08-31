@@ -37,12 +37,16 @@ record and all ranges.
 
 The parser prefers a valid central directory. In tolerant mode it can fall
 back to a bounded scan of local headers when the directory or EOCD is absent.
-Strict mode requires a valid EOCD and central directory.
+That recovery follows declared record boundaries from byte zero, so a local
+header signature embedded in a payload cannot create a phantom entry. Strict
+mode requires an EOCD ending at end-of-file, a central directory ending
+exactly at the EOCD, consistent single-disk counts, and matching local and
+central names, flags, methods, CRCs, and sizes.
 
 Names are decoded as UTF-8 when the ZIP UTF-8 flag is set. Tolerant decoding
 uses a loss-replacing fallback for an unflagged non-UTF-8 name. Packing and
 unpacking reject absolute, empty, dot/dot-dot, backslash, colon, and NUL
-bearing names.
+bearing names, as well as other control characters.
 
 ## Payload methods
 
@@ -77,20 +81,25 @@ declaration:
     <?xml version="1.0" encoding="UTF-8" ?>
 
 The grammar has a 256-entry tag dictionary and a 256-entry attribute
-dictionary. First-use names are literal; later starts, close tags, and
-attribute names may use one-byte references. Literal and reference starts have
-slightly different implicit-> states, which is why the encoder performs an
-internal decode check.
+dictionary. First-use tag names are literal and later starts and close tags
+use one-byte references where the grammar permits. The decoder accepts
+attribute-name references found in input, but the encoder deliberately emits
+attributes literally because TI's own expander has been observed to truncate
+at repeated-attribute reference tokens. Literal and reference tag starts have
+slightly different implicit greater-than states, which is why the encoder
+performs an internal decode check.
 
 Text has literal printable ASCII, two shorthand tables, compact forms for
 Unicode, and several TI-specific text states. The implementation preserves
 valid UTF-8 including supplementary code points such as emoji. CDATA opener,
 body, and ]]> terminator bytes pass through literally. XML comments, DOCTYPE,
 arbitrary processing instructions, non-canonical declarations, invalid UTF-8,
-and malformed dictionary/control states are rejected.
+XML 1.0-forbidden code points, and malformed dictionary/control states are
+rejected.
 
-Lua packing splits source occurrences of ]]> into adjacent CDATA sections
-before TIXC encoding. This preserves source bytes while producing legal XML.
+Lua packing represents source occurrences of ]]> as ]]]]><![CDATA[> across
+adjacent CDATA sections before TIXC encoding. This preserves all three source
+bytes while producing legal XML.
 
 ## Metadata compatibility
 
@@ -104,4 +113,3 @@ decoded bytes. For method 13 there are two observed conventions:
 decode_entry reports ValidFinal, LegacyPayload, or Mismatch, and carries
 warnings in tolerant mode. Strict mode rejects every method-13 interpretation
 other than ValidFinal.
-

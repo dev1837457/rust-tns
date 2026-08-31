@@ -2,11 +2,16 @@
  * This file is part of the Rust TNS modernization and is made available
  * under the Mozilla Public License Version 1.1. See the repository LICENSE
  * file for the complete terms.
+ *
+ * The Original Code is Rust TNS modernization.
+ * The Initial Developer is TNS modernization contributors.
+ * Portions created by the Initial Developer are Copyright (C) 2026
+ * TNS modernization contributors. All Rights Reserved.
  */
 
 use std::io::{Read, Write};
 
-use flate2::read::DeflateDecoder;
+use flate2::bufread::DeflateDecoder;
 use flate2::write::DeflateEncoder;
 use flate2::Compression;
 
@@ -44,6 +49,13 @@ pub(crate) fn inflate_raw(data: &[u8], max_output: usize) -> Result<Vec<u8>> {
             });
         }
         output.extend_from_slice(&buffer[..read]);
+    }
+    if decoder.total_in() != data.len() as u64 {
+        return Err(TnsError::Deflate(format!(
+            "raw stream ended after {} of {} bytes",
+            decoder.total_in(),
+            data.len()
+        )));
     }
     Ok(output)
 }

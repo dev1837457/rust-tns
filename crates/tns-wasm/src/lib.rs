@@ -2,6 +2,11 @@
  * This file is part of the Rust TNS modernization and is made available
  * under the Mozilla Public License Version 1.1. See the repository LICENSE
  * file for the complete terms.
+ *
+ * The Original Code is Rust TNS modernization.
+ * The Initial Developer is TNS modernization contributors.
+ * Portions created by the Initial Developer are Copyright (C) 2026
+ * TNS modernization contributors. All Rights Reserved.
  */
 
 //! Minimal browser-facing facade. The core remains usable from native Rust;
@@ -18,6 +23,9 @@ fn options(tolerant: bool) -> ParseOptions {
         } else {
             ParseMode::Strict
         },
+        max_input_size: 64 * 1024 * 1024,
+        max_entry_size: 32 * 1024 * 1024,
+        max_total_uncompressed_size: 64 * 1024 * 1024,
         ..ParseOptions::default()
     }
 }

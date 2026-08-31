@@ -72,16 +72,20 @@ The core API separates parsing, payload decoding, and writing:
 
 The public core supports stored (method 0), raw DEFLATE (method 8), and
 TI-Nspire method 13 payloads. TIXC encoding and decoding preserve canonical
-UTF-8 XML, Unicode code points, repeated tag/attribute dictionaries,
-self-closing tags, and CDATA. Unsupported XML declarations, comments,
-DOCTYPE/other markup, data-descriptor local records, and unknown compression
-methods produce explicit errors.
+UTF-8 XML, Unicode code points, repeated tags and attributes, self-closing
+tags, and CDATA. Unsupported XML declarations, comments,
+DOCTYPE/other markup, invalid UTF-8 or XML 1.0 code points, data-descriptor
+local records, and unknown compression methods produce explicit errors.
 
 ## Compatibility and limits
 
-The default limits are deliberately finite: 512 MiB input, 256 MiB per entry,
-512 MiB total directory-declared output, 65,535 entries, and 4,096-byte names.
-Callers can lower them through ParseOptions and TixcLimits.
+The native default limits are deliberately finite: 512 MiB input/output,
+256 MiB per entry and TIXC input/output, 512 MiB total directory-declared
+output, 65,535 entries, 4,096-byte archive names, 256-byte XML attribute
+names, and XML nesting depth 1,024. Writers apply matching per-entry, name,
+and total limits. Callers can lower them through ParseOptions,
+TnsWriteOptions, and TixcLimits. The WASM facade uses lower 64 MiB
+container/total and 32 MiB entry limits for browser memory budgets.
 
 TNS metadata is not completely uniform across producers. Modern method-13
 files normally describe final XML in the directory. Luna 2.x can describe the
@@ -89,6 +93,12 @@ encrypted method-13 payload instead. Tolerant decoding accepts the latter and
 returns a warning; strict decoding rejects it. CRC and size mismatches that
 match neither interpretation are still visible in tolerant mode and are
 errors in strict mode.
+
+Strict outer parsing also requires the EOCD to finish at end-of-file, an exact
+central-directory size, single-disk counts, and matching local/central names
+and metadata. Tolerant mode may recover a contiguous sequence of complete
+local records when directory metadata is absent or corrupt; it does not scan
+inside payload bytes for header-shaped data.
 
 The public regression suite creates all of its fixtures in memory. Private
 compatibility review may use public downloads, but TI documents and other
@@ -100,4 +110,3 @@ third-party files are not included in this repository.
 * SECURITY.md documents hostile-input and output-safety rules.
 * THIRD_PARTY.md records provenance and dependency licenses.
 * LICENSE is the governing MPL 1.1 license for this modernization.
-

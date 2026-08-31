@@ -1,0 +1,17 @@
+[package]
+name = "tns"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Inspect, unpack, and build TI-Nspire TNS documents"
+
+[[bin]]
+name = "tns"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+tempfile = "3.20"
+tns-core = { path = "../tns-core" }
+

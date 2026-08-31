@@ -1,0 +1,28 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Rust TNS inspector</title>
+<style>
+  body { font: 16px system-ui, sans-serif; max-width: 70rem; margin: 2rem auto; padding: 0 1rem; }
+  pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #f3f4f6; padding: 1rem; }
+</style>
+<h1>Rust TNS inspector</h1>
+<p>Select a TNS file to parse its outer container in WebAssembly.</p>
+<input id="file" type="file" accept=".tns">
+<pre id="result">No file selected.</pre>
+<script type="module">
+  import init, { inspect_tns } from "./pkg/tns_wasm.js";
+
+  await init();
+  const file = document.querySelector("#file");
+  const result = document.querySelector("#result");
+  file.addEventListener("change", async () => {
+    const selected = file.files[0];
+    if (!selected) return;
+    try {
+      result.textContent = inspect_tns(new Uint8Array(await selected.arrayBuffer()), true);
+    } catch (error) {
+      result.textContent = String(error);
+    }
+  });
+</script>
+

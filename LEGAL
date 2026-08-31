@@ -1,0 +1,15 @@
+This source distribution is the Rust TNS modernization, released under the
+Mozilla Public License Version 1.1. It is an independent Rust implementation
+informed by the documented behavior of ndless-nspire/Luna and MaksimirKurtov/
+TnsTools. No large code blocks from either reference implementation are
+included.
+
+The original Luna project identifies Olivier Armand as its initial developer
+and is itself MPL 1.1. TnsTools identifies its contributors and is MIT
+licensed. Their names and licenses are retained here for provenance only; the
+copyright and license of the reference projects are not claimed by this
+project.
+
+No known third-party patent or other legal claim is being asserted against
+the interoperability algorithms implemented here.
+

@@ -1,0 +1,5 @@
+/target/
+.local-corpus/
+*.tns
+*.tns.xml/
+*.verify.xml/

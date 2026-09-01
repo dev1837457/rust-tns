@@ -4,7 +4,12 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "Small wasm-bindgen facade over the native-safe TNS core"
+description = "wasm-bindgen inspection facade for the bounded TNS core"
+readme = "../../README.md"
+documentation = "https://docs.rs/tns-wasm"
+keywords = ["ti-nspire", "tns", "wasm", "webassembly"]
+categories = ["wasm"]
+publish.workspace = true
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -12,4 +17,3 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 tns-core = { path = "../tns-core" }
 wasm-bindgen = "0.2"
-

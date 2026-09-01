@@ -1,5 +1,23 @@
 /target/
-.local-corpus/
+/wasm-demo/pkg/
+
+# Local compatibility corpora and downloaded public samples.
+/.local-corpus/
+/public-corpus/
+/compatibility-corpus/
 *.tns
-*.tns.xml/
-*.verify.xml/
+*.tns.xml
+*.verify.xml
+*.tixc
+
+# Generated or temporary files.
+*.tmp
+*.temp
+*.swp
+*~
+.DS_Store
+
+# Private review material; public review documentation remains trackable.
+/.review/
+/.private-review/
+/review-artifacts/

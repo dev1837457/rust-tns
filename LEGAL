@@ -1,15 +1,27 @@
-This source distribution is the Rust TNS modernization, released under the
-Mozilla Public License Version 1.1. It is an independent Rust implementation
-informed by the documented behavior of ndless-nspire/Luna and MaksimirKurtov/
-TnsTools. No large code blocks from either reference implementation are
-included.
+This source distribution is the independent Rust TNS modernization, released
+under the Mozilla Public License Version 1.1. The repository's source notices
+identify Rust TNS modernization as the Original Code and TNS modernization
+contributors as the Initial Developer for this code.
 
-The original Luna project identifies Olivier Armand as its initial developer
-and is itself MPL 1.1. TnsTools identifies its contributors and is MIT
-licensed. Their names and licenses are retained here for provenance only; the
-copyright and license of the reference projects are not claimed by this
-project.
+The implementation was informed by documented behavior and interoperability
+research in ndless-nspire/Luna and MaksimirKurtov/TnsTools. Those projects are
+reference implementations, not vendored dependencies. No Luna C, MiniZip, or
+DES source; no TnsTools Python source; and no downloaded TNS documents or TI
+software are included in this repository.
+
+The audited Luna source notice identifies its Original Code as "Luna code"
+and its Initial Developer as Olivier ARMAND. Luna is distributed under MPL
+1.1. Its DES and MiniZip files carry their own separate third-party notices;
+those files are not part of Rust TNS.
+
+The audited TnsTools LICENSE states:
+
+    MIT License
+    Copyright (c) 2026 tnstools contributors
+
+No TnsTools source or substantial portion is included here, so that notice
+records provenance and does not relicense any Rust TNS code. The complete
+reference notice and dependency license summary are in THIRD_PARTY.md.
 
 No known third-party patent or other legal claim is being asserted against
 the interoperability algorithms implemented here.
-

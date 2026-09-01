@@ -4,7 +4,12 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "Inspect, unpack, and build TI-Nspire TNS documents"
+description = "Inspect, unpack, verify, and build TI-Nspire TNS documents"
+readme = "../../README.md"
+documentation = "https://docs.rs/tns"
+keywords = ["ti-nspire", "tns", "cli", "xml"]
+categories = ["command-line-utilities"]
+publish.workspace = true
 
 [[bin]]
 name = "tns"

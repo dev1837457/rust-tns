@@ -1,112 +1,241 @@
 # Rust TNS
 
-Rust TNS is a safe, reusable first implementation of the TI-Nspire .tns
-container and its XML payload pipeline. It is intended for interoperability
-work: it can inspect and unpack existing documents, and build ScriptApp,
-PythonEditor, or folder-based documents without copying opaque reference
+Rust TNS is an independent, safe Rust implementation of the ZIP-like
+TI-Nspire .tns container and its XML payload pipeline. It is for
+interoperability work: inspect and unpack existing documents, preserve
+resource entries, and build ScriptApp, PythonEditor, or folder-based
+documents without bundling proprietary TI software or opaque reference
 payloads.
 
-The native core is in tns-core. The tns binary provides the practical
-workflow, and tns-wasm exposes a small wasm-bindgen facade for browser
-callers.
+The workspace contains:
 
-## Build
+- tns-core, a bounded library for parsing, decoding, encoding, and writing
+  the implemented TNS subset;
+- tns, a command-line tool for inspection, unpacking, verification, and
+  packing Lua, Python, XML, and resource files; and
+- tns-wasm, a small wasm-bindgen facade for browser-side inspection and
+  per-entry decoding.
 
-No system package or root access is needed. With a user-local Rust install:
+This repository is being prepared for its first public v0.1 release. The API
+and compatibility surface may change before 1.0.
+
+## Features
+
+- Parses and writes the ZIP-shaped TNS outer container, including the
+  TI-specific first TIMLP header and TIPD end marker.
+- Supports stored entries (method 0), raw DEFLATE entries (method 8), and
+  TI method-13 XML entries.
+- Encodes and decodes the TIXC0100 XML token stream, including UTF-8,
+  Unicode code points, repeated tags and attributes, self-closing tags, and
+  CDATA.
+- Generates semantic ScriptApp/Lua and PythonEditor documents.
+- Preserves arbitrary resource bytes when packing and unpacking.
+- Applies finite input, expansion, name, entry-count, and output limits.
+- Uses strict and tolerant parsing modes, with warnings for the older
+  method-13 metadata convention.
+- Publishes complete staged output and uses atomic file replacement workflows
+  where the host platform supports them.
+- Does not use unsafe Rust.
+
+## Install and build
+
+Rust stable and Cargo are required. A user-local installation is sufficient;
+the native build does not require a system package manager, root access, or
+the proprietary TI/Phoenix software.
+
+From a checkout:
 
     rustup toolchain install stable --profile minimal
-    cargo build --release
+    cargo build --workspace --release
     cargo test --workspace
-    cargo clippy --workspace --all-targets -- -D warnings
 
-The executable is target/release/tns.
+The CLI binary is target/release/tns. To install it into Cargo's user-local
+bin directory:
 
-## Command-line examples
+    cargo install --path crates/tns-cli --locked
 
-Inspect a real or generated document. Tolerant mode is the compatibility
-default and reports Luna's legacy method-13 metadata convention:
+The crates are not published to crates.io as part of v0.1. Clone or download
+the source tree and build them locally.
+
+For the complete validation commands used by maintainers, see
+[CONTRIBUTING.md](CONTRIBUTING.md) and [RELEASING.md](RELEASING.md).
+
+## Command-line use
+
+Run tns after cargo install, or replace tns below with
+cargo run --quiet --bin tns -- when working directly from the checkout.
+
+Inspect a document. Tolerant mode is the compatibility-oriented default;
+strict mode rejects metadata inconsistencies and requires a complete,
+well-formed outer directory:
 
     tns inspect input.tns
     tns inspect input.tns --mode strict
 
-Unpack XML and resources into a new directory. The command stages all output
-before replacing the destination and refuses an existing destination unless
---force is explicit:
+Unpack every supported entry into a new directory. Output is staged before
+publication, and an existing destination requires explicit --force:
 
     tns unpack input.tns unpacked/
-    tns verify input.tns unpacked/ --mode tolerant
+    tns verify input.tns unpacked/ --mode strict
 
-Build a folder of Document.xml, Problem*.xml, and resources. XML is method-13
-encoded by default and other files use ordinary raw DEFLATE:
+Pack a directory containing Document.xml, Problem*.xml, and resources. XML
+uses method 13 by default; other files use raw DEFLATE:
 
     tns pack-xml unpacked/ rebuilt.tns --timlp 0601
     tns pack-xml xml-and-resources/ stored.tns --xml-method stored --force
 
-Pack loose source:
+Pack Lua source as a ScriptApp, including source read from standard input:
 
     tns pack-lua hello.lua hello.tns --timlp 0500
     cat hello.lua | tns pack-lua - hello.tns
+
+Pack one or more Python files as a PythonEditor document. The first source
+file is the one named by the generated problem:
+
     tns pack-python main.py helpers.py python-app.tns
 
-Generated XML uses semantic ScriptApp and PythonEditor templates. Lua source
-is placed in safely split CDATA sections, including when it contains ]]>.
-Python entries are ordinary method-8 source files and the first file is the
-one named by the PythonEditor problem.
+The packers reject unsafe archive names, refuse to replace existing output
+unless --force is supplied, and bound input and generated output sizes.
+Use tns --help and the subcommand help pages for the current option list.
 
 ## Library use
 
-The core API separates parsing, payload decoding, and writing:
+The core API separates container parsing, payload decoding, and writing. This
+example reads a document, applies the default finite limits, and prints the
+decoded size of every entry:
 
+    use std::error::Error;
+    use std::fs;
     use tns_core::{decode_entry, ParseMode, ParseOptions, TnsContainer};
 
-    let bytes = std::fs::read("document.tns")?;
-    let options = ParseOptions {
-        mode: ParseMode::Tolerant,
-        ..ParseOptions::default()
-    };
-    let container = TnsContainer::parse(&bytes, options)?;
-    for entry in &container.entries {
-        let decoded = decode_entry(&bytes, entry, options)?;
-        println!("{}: {} bytes", entry.name, decoded.bytes.len());
+    fn main() -> Result<(), Box<dyn Error>> {
+        let bytes = fs::read("document.tns")?;
+        let options = ParseOptions {
+            mode: ParseMode::Strict,
+            ..ParseOptions::default()
+        };
+        let container = TnsContainer::parse(&bytes, options)?;
+
+        for entry in &container.entries {
+            let decoded = decode_entry(&bytes, entry, options)?;
+            println!("{}: {} bytes", entry.name, decoded.bytes.len());
+        }
+        Ok(())
     }
 
-The public core supports stored (method 0), raw DEFLATE (method 8), and
-TI-Nspire method 13 payloads. TIXC encoding and decoding preserve canonical
-UTF-8 XML, Unicode code points, repeated tags and attributes, self-closing
-tags, and CDATA. Unsupported XML declarations, comments,
-DOCTYPE/other markup, invalid UTF-8 or XML 1.0 code points, data-descriptor
-local records, and unknown compression methods produce explicit errors.
+The public core supports stored, raw DEFLATE, and method-13 payloads.
+TIXC encoding and decoding use canonical UTF-8 XML and reject unsupported
+declarations, comments, DOCTYPE/other markup, invalid UTF-8, forbidden XML
+1.0 code points, malformed token states, and unknown compression methods.
+Applications handling untrusted input should prefer ParseMode::Strict and
+lower the ParseOptions, TnsWriteOptions, and TixcLimits values for their
+workload.
 
-## Compatibility and limits
+## WASM status
 
-The native default limits are deliberately finite: 512 MiB input/output,
-256 MiB per entry and TIXC input/output, 512 MiB total directory-declared
-output, 65,535 entries, 4,096-byte archive names, 256-byte XML attribute
-names, and XML nesting depth 1,024. Writers apply matching per-entry, name,
-and total limits. Callers can lower them through ParseOptions,
-TnsWriteOptions, and TixcLimits. The WASM facade uses lower 64 MiB
-container/total and 32 MiB entry limits for browser memory budgets.
+tns-wasm currently exposes inspection and per-entry decoding only:
+inspect_tns and decode_tns_entry. Browser-side construction, streaming, and a
+JavaScript package distribution are outside v0.1.
 
-TNS metadata is not completely uniform across producers. Modern method-13
-files normally describe final XML in the directory. Luna 2.x can describe the
-encrypted method-13 payload instead. Tolerant decoding accepts the latter and
-returns a warning; strict decoding rejects it. CRC and size mismatches that
-match neither interpretation are still visible in tolerant mode and are
-errors in strict mode.
+The facade can be compile-checked with:
 
-Strict outer parsing also requires the EOCD to finish at end-of-file, an exact
-central-directory size, single-disk counts, and matching local/central names
-and metadata. Tolerant mode may recover a contiguous sequence of complete
-local records when directory metadata is absent or corrupt; it does not scan
-inside payload bytes for header-shaped data.
+    rustup target add wasm32-unknown-unknown
+    cargo check -p tns-wasm --target wasm32-unknown-unknown
 
-The public regression suite creates all of its fixtures in memory. Private
-compatibility review may use public downloads, but TI documents and other
-third-party files are not included in this repository.
+To build the included local demo, install wasm-pack and generate its ignored
+output directory:
 
-## Repository documents
+    cargo install wasm-pack --locked
+    wasm-pack build crates/tns-wasm --target web --out-dir ../../wasm-demo/pkg
+    python3 -m http.server 8000 --directory wasm-demo
 
-* FORMAT.md describes the implemented byte pipeline.
-* SECURITY.md documents hostile-input and output-safety rules.
-* THIRD_PARTY.md records provenance and dependency licenses.
-* LICENSE is the governing MPL 1.1 license for this modernization.
+Open http://localhost:8000/ in a browser. The demo parses the selected file
+locally; it does not upload the file anywhere. See
+[wasm-demo/README.md](wasm-demo/README.md).
+
+## Compatibility and v0.1 limitations
+
+Rust TNS implements a documented interoperability subset, not every TNS
+variant. Compatibility targets decoded entry identity and safe handling of
+real-world metadata differences. Tolerant mode understands the legacy Luna
+method-13 convention in which directory size and CRC describe the encoded
+payload; strict mode accepts only final-XML metadata.
+
+The v0.1 implementation intentionally does not support ZIP64, data
+descriptors, multi-disk archives, ZIP-layer encryption, or compression
+methods other than 0, 8, and 13. Repacking preserves decoded names and
+resource bytes, not original timestamps, comments, extra fields, ordering,
+compressed bytes, or every container metadata detail. The XML codec accepts
+the supported canonical subset; it is not a general XML parser.
+
+Method 13's fixed-key 3DES construction is legacy format compatibility, not
+authenticated encryption and not a security boundary. The WASM facade uses
+smaller browser-oriented limits and does not stream large documents.
+
+Native defaults cap input and aggregate output at 512 MiB, each entry and
+TIXC expansion at 256 MiB, archive names at 4,096 bytes, and the entry count
+at 65,535. The WASM facade caps the container and aggregate output at 64 MiB
+and each entry at 32 MiB. Callers can lower these limits.
+
+The regression suite and compatibility review use synthetic fixtures and
+non-redistributed public documents. Actual TI-Nspire hardware and TI
+software acceptance remain the outstanding real-device validation step.
+This project makes no calculator hardware certification claim and does not
+claim proprietary TI/Phoenix testing.
+
+## Security
+
+Treat .tns files as hostile input. The parser and writers enforce bounds,
+validate ranges and metadata, reject unsafe output paths, and stage output
+before publication. Read [SECURITY.md](SECURITY.md) before integrating the
+library into a service or processing files from untrusted sources. Please
+report suspected vulnerabilities privately as described there rather than
+opening a public issue.
+
+## Project status
+
+v0.1 is a reviewed, test-backed interoperability baseline and the first
+public release-preparation line. It is suitable for experimentation, format
+research, and cautious local workflows. It is not a promise of complete
+support for every TI-Nspire producer or of acceptance by TI
+hardware/software. Contributions that add focused tests, document observed
+format behavior, or improve bounded error handling are welcome.
+
+## Documentation
+
+- [FORMAT.md](FORMAT.md) describes the implemented byte pipeline and
+  compatibility rules.
+- [SECURITY.md](SECURITY.md) covers hostile input and output safety.
+- [THIRD_PARTY.md](THIRD_PARTY.md) records provenance and dependency licenses.
+- [CHANGELOG.md](CHANGELOG.md) records the v0.1 release-line history.
+- [CONTRIBUTING.md](CONTRIBUTING.md) and [RELEASING.md](RELEASING.md) describe
+  development and source-release workflows.
+
+## Acknowledgements and provenance
+
+The implementation was informed by two public reference implementations:
+
+- [Luna by the ndless-nspire project](https://github.com/ndless-nspire/Luna),
+  a C command-line converter for Lua, Python, XML, and TNS resources.
+- [TnsTools by MaksimirKurtov](https://github.com/MaksimirKurtov/TnsTools),
+  a pure-Python decoder and method-13/TIXC encoder.
+
+They were used for interoperability research and comparison of documented
+format behavior. No Luna C source, MiniZip or DES source, TnsTools Python
+source, downloaded .tns file, TI OS image, proprietary DLL, or reference
+source tree is vendored or redistributed here. The Rust implementation is
+independent code released under the MPL 1.1; see [LEGAL](LEGAL) and
+[THIRD_PARTY.md](THIRD_PARTY.md) for the audited provenance and dependency
+notices.
+
+## License and trademark disclaimer
+
+Rust TNS is distributed under the [Mozilla Public License Version 1.1](LICENSE).
+The source notices identify the Rust TNS modernization as the Original Code
+and Initial Developer for this repository's code.
+
+TI-Nspire, TI, and related product names are trademarks of their respective
+owners. Rust TNS is not affiliated with, endorsed by, sponsored by, or
+certified by Texas Instruments. The names are used only to identify the
+interoperability target. No TI software or proprietary TI/Phoenix component
+is included.

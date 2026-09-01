@@ -40,3 +40,12 @@ or back up that directory first.
 
 The external compatibility corpus used during development is kept outside this
 repository. It is not test input for releases and is not redistributed.
+
+## Reporting a vulnerability
+
+Please do not report suspected vulnerabilities in a public issue. After this
+repository is published, use GitHub's private vulnerability reporting channel
+from the Security tab when it is available, or contact the maintainers through
+the repository's private contact options. Include the affected commit or
+version, a minimal reproduction, and the impact. Do not send proprietary TI
+files, private data, or a large downloaded corpus.

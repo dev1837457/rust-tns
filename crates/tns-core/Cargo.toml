@@ -4,11 +4,15 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "Safe parser, codec, and packer for TI-Nspire TNS documents"
+description = "Bounded parser, codec, and writer for TI-Nspire TNS documents"
+readme = "../../README.md"
+documentation = "https://docs.rs/tns-core"
+keywords = ["ti-nspire", "tns", "xml", "parser", "interoperability"]
+categories = ["encoding", "parsing"]
+publish.workspace = true
 
 [dependencies]
 crc32fast.workspace = true
 des.workspace = true
 flate2.workspace = true
 thiserror.workspace = true
-

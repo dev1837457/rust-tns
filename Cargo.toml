@@ -11,6 +11,8 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-1.1"
 authors = ["TNS modernization contributors"]
+publish = false
+# repository and homepage are set when the canonical public GitHub URL exists.
 
 [workspace.dependencies]
 crc32fast = "1.4"

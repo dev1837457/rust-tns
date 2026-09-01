@@ -5,10 +5,9 @@ marked publish = false; do not publish them to crates.io as part of v0.1.
 
 ## Maintainer checklist
 
-1. Confirm that the canonical GitHub repository has been created. This
-   checkout has no remote and therefore does not guess an owner or repository
-   URL. Before publication, set the final repository and homepage URLs in all
-   package manifests, and verify each documentation/readme link.
+1. Confirm that the canonical GitHub repository and package metadata point to
+   https://github.com/dev1837457/rust-tns, then verify each documentation and
+   README link.
 2. Update the workspace version and this changelog. Keep all workspace crate
    versions aligned and keep publish = false unless crate publication is an
    explicit, separately reviewed decision.

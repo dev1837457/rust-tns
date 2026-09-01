@@ -12,7 +12,8 @@ edition = "2021"
 license = "MPL-1.1"
 authors = ["TNS modernization contributors"]
 publish = false
-# repository and homepage are set when the canonical public GitHub URL exists.
+repository = "https://github.com/dev1837457/rust-tns"
+homepage = "https://github.com/dev1837457/rust-tns"
 
 [workspace.dependencies]
 crc32fast = "1.4"

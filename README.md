@@ -1,5 +1,8 @@
 # Rust TNS
 
+[![CI](https://github.com/dev1837457/rust-tns/actions/workflows/ci.yml/badge.svg)](https://github.com/dev1837457/rust-tns/actions/workflows/ci.yml)
+[![License: MPL 1.1](https://img.shields.io/badge/license-MPL--1.1-blue.svg)](LICENSE)
+
 Rust TNS is an independent, safe Rust implementation of the ZIP-like
 TI-Nspire .tns container and its XML payload pipeline. It is for
 interoperability work: inspect and unpack existing documents, preserve
@@ -16,8 +19,8 @@ The workspace contains:
 - tns-wasm, a small wasm-bindgen facade for browser-side inspection and
   per-entry decoding.
 
-This repository is being prepared for its first public v0.1 release. The API
-and compatibility surface may change before 1.0.
+This is the first public v0.1 release line. The API and compatibility surface
+may change before 1.0.
 
 ## Features
 

@@ -3,7 +3,7 @@
 All notable changes to Rust TNS are recorded here. The project is in the
 0.x series, so public APIs and compatibility behavior may change.
 
-## 0.1.0 — Unreleased
+## 0.1.0 — 2026-09-26
 
 - Added a bounded Rust implementation of the ZIP-like TI-Nspire TNS
   container and TIXC XML pipeline.
